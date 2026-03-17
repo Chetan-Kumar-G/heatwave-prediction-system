@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3000';
+const API_BASE = '';
 
 /**
  * Initializes the dashboard on load.
@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function checkSystemStatus() {
     const statusDot = document.querySelector('.status-dot');
     const statusText = document.querySelector('.system-status span');
-    
+
     try {
         const res = await fetch(`${API_BASE}/health`, { timeout: 3000 });
         if (res.ok) {
@@ -38,7 +38,7 @@ function switchTab(tabId, element) {
 
     const targetTab = document.getElementById(tabId);
     if (targetTab) targetTab.classList.add('active');
-    
+
     if (element) element.classList.add('active');
 
     // Update Header Title
@@ -109,7 +109,7 @@ function showResults(data) {
 
     const prob = data.probability;
     const isHeatwave = data.prediction === 1;
-    
+
     // Risk Level Logic
     let risk = "Low Risk";
     let riskClass = "risk-low";
@@ -129,7 +129,7 @@ function showResults(data) {
     }
 
     document.getElementById('res-status-text').innerText = isHeatwave ? "Heatwave Warning" : "Clear Conditions";
-    document.getElementById('res-description').innerText = isHeatwave 
+    document.getElementById('res-description').innerText = isHeatwave
         ? "Warning: Atmospheric patterns indicate a high likelihood of heatwave conditions. Stay hydrated and avoid outdoor activities."
         : "Stable: Current weather patterns are within normal ranges. No immediate heatwave threat detected.";
 
@@ -157,7 +157,7 @@ async function loadHistory() {
 
         // Update Table
         renderTable(data);
-        
+
         // Update Charts (only if visible)
         if (document.getElementById('history').classList.contains('active')) {
             renderCharts(data);
@@ -196,15 +196,15 @@ function showAlert(message, type = 'error') {
     const container = document.getElementById('alert-container');
     const alert = document.createElement('div');
     alert.className = `alert ${type}`;
-    
+
     const icon = type === 'error' ? 'fa-exclamation-circle' : 'fa-check-circle';
     const color = type === 'error' ? 'var(--danger)' : 'var(--success)';
-    
+
     alert.style.borderLeftColor = color;
     alert.innerHTML = `<i class="fas ${icon}" style="color: ${color}"></i><span>${message}</span>`;
-    
+
     container.appendChild(alert);
-    
+
     setTimeout(() => {
         alert.style.opacity = '0';
         alert.style.transform = 'translateX(20px)';
