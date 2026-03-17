@@ -1,4 +1,4 @@
-const API_BASE = '';
+const API_BASE = 'https://heatwave-prediction-system.onrender.com';
 
 /**
  * Initializes the dashboard on load.
