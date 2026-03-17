@@ -1,4 +1,4 @@
-FROM haskell:9.2
+FROM haskell:9.6
 
 WORKDIR /app
 
@@ -11,4 +11,4 @@ RUN cabal build
 
 EXPOSE 3000
 
-CMD ["cabal", "run", "heatwave-backend"]
+CMD ["cabal","run","heatwave-backend"]
