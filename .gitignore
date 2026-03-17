@@ -1,0 +1,19 @@
+# Haskell build files
+dist-newstyle/
+**/dist-newstyle/
+.cache/
+build/
+tmp/
+
+# database
+*.db
+
+# node
+node_modules/
+
+# environment
+.env
+
+# OS files
+.DS_Store
+Thumbs.db

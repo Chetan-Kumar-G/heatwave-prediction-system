@@ -1,0 +1,209 @@
+# Heatwave Prediction Project: Architectural Breakdown
+
+This document provides a comprehensive structural breakdown and file-by-file explanation of the Heatwave Recognition project. It serves as a complete guide for any developer looking to understand the system's architecture, data flow, ML integration, and deployment process.
+
+---
+
+## 1. Folder Structure
+
+The project is divided into two primary directories, enforcing a clean separation of concerns between the user interface and the backend processing/model logic.
+
+- **`backend/`**: Contains the Haskell server setup, machine learning (ML) model implementation, data handling, and database interactions. It functions as the core engine of the system.
+- **`frontend/`**: Contains the static web assets (HTML, CSS, JavaScript) that constitute the user interface. It acts as the presentation layer, consuming the backend API.
+
+### Interaction
+The frontend interacts with the backend strictly via HTTP REST API calls (specifically, `POST /predict` and `GET /history`). The backend handles the data logic, executes the machine learning model, and responds with JSON data.
+
+---
+
+## 2. File-by-File Explanation
+
+### Backend (`backend/heatwave-backend/`)
+
+#### `app/Main.hs`
+- **Purpose**: The entry point of the backend application. Initializes the system, trains the model, and starts the web server.
+- **Main Functions**: `main`
+- **Execution**:
+  1. Calls `initDB` to set up the SQLite database mapping.
+  2. Calls `loadData "data.csv"` to grab historical datasets.
+  3. Trains the ML model (`train`) on startup using gradient descent.
+  4. Stores the model weights in an `IORef` for concurrent thread access.
+  5. Starts the Scotty web server on port 3000, defining routes (`/health`, `/predict`, `/history`) and enabling CORS.
+- **Dependencies**: Imports Scotty, CORS middleware, and modules `Types`, `Database`, `DataLoader`, `ML`.
+
+#### `src/Types.hs`
+- **Purpose**: Defines all the data types, JSON deserialization/serialization logic, and Database row mappings.
+- **Main Types**: 
+  - `HeatwaveData`: Represents a row of CSV data used for training.
+  - `PredictRequest`: Represents incoming JSON payload from the frontend.
+  - `PredictResponse`: The outgoing JSON payload back to the frontend.
+  - `HistoryRecord`: Structure for extracting database records.
+- **Dependencies**: `Data.Aeson` (for JSON formatting), `GHC.Generics`, `Database.SQLite.Simple`.
+
+#### `src/Database.hs`
+- **Purpose**: Manages all SQLite database connectivity and queries.
+- **Main Functions**:
+  - `initDB`: Creates the `history` table if it doesn't exist.
+  - `savePrediction (PredictRequest, PredictResponse)`: Inserts a new prediction and its metadata into the DB.
+  - `getHistory`: Fetches the last 50 queries/results from the database.
+- **Dependencies**: `Types.hs`, `Database.SQLite.Simple`.
+
+#### `src/DataLoader.hs`
+- **Purpose**: Responsible for parsing the raw CSV mapping into Haskell datasets for ML usage.
+- **Main Functions**:
+  - `loadData`: Reads `data.csv` using the cassava CSV library and parses it.
+  - `extractFeatures`: Converts the CSV records into a list of tuples containing features (`[bias, maxTemp, minTemp, humidity]`) and labels.
+- **Dependencies**: `Data.Csv`, `Types.hs`.
+
+#### `src/ML.hs`
+- **Purpose**: Pure functional implementation of a Binary Logistic Regression model written from scratch.
+- **Main Functions**:
+  - `sigmoid`: The activation function mapping values between 0 and 1.
+  - `predictProb`: Calculates the dot product of weights and input features, returning a probability via `sigmoid`.
+  - `predictClass`: Casts probability into a 0 or 1 baseline against a 0.5 threshold.
+  - `updateWeights` & `train`: Iteratively updates the initial weights (`alpha`, learning rate) to minimize the error gradient.
+- **Dependencies**: `Types.hs`.
+
+### Frontend (`frontend/`)
+
+#### `index.html`
+- **Purpose**: Defines the layout and structure of the single-page application.
+- **Details**: Contains navigation (Sidebar) and sections (Home, Predict, Results, History). Uses standard HTML forms for taking user inputs.
+
+#### `styles.css`
+- **Purpose**: Defines the visual styling of the UI, adopting a modern card-based layout, CSS transitions, tabular alignment, and responsive sizing. Provides specific visual indicators (like `heatwave-yes` vs `heatwave-no` coloring).
+
+#### `app.js`
+- **Purpose**: The core client-side logic.
+- **Main Functions**:
+  - `switchTab`: Controls the navigation by toggling active CSS classes.
+  - Event Listener on `predict-form`: Gathers input values, sends an HTTP `POST` to `http://localhost:3000/predict`.
+  - `showResults`: Parses the backend JSON, dynamically updates UI DOM nodes with prediction values, and alters CSS gradients for the probability circle.
+  - `loadHistory` & `renderChart`: Fetches data from `/history` and utilizes `Chart.js` to draw historical trends line graphs.
+
+---
+
+## 3. System Flow
+
+1. **Initialization (Start-up)**: When the Haskell executable runs, it starts in `Main.hs`. It initializes the SQLite db, loads the `data.csv`, extracts the features, and strictly evaluates the Logistic Regression training loop for 5000 epochs. It saves the resulting model weights into an `IORef` variable.
+2. **Server Listening**: The Scotty REST server starts listening on port 3000.
+3. **Frontend Request**: The user navigates to the UI, enters weather values, and hits "Predict". `app.js` catches this, builds a JSON object, and sends a `POST` request to `/predict`.
+4. **Backend Processing**: The `/predict` endpoint parses the JSON logic into a `PredictRequest`. It reads the pre-trained weights from the `IORef`.
+5. **Pattern Matching / ML Execution**: Features are constructed `[1.0, MaxTemp, MinTemp, Humidity]`. `ML.hs` takes these and calculates the probability (`predictProb`) and class (`predictClass`).
+6. **Persistence**: `Database.hs` -> `savePrediction` is called to save the user's inputs alongside the generated output.
+7. **Response**: A JSON `PredictResponse` is returned to the frontend.
+8. **UI Update**: `app.js`'s `showResults` modifies the DOM to show the prediction graph and boolean outcome.
+
+---
+
+## 4. Dependency Map
+
+- `app/Main.hs` 
+    ├── depends on `Types.hs`
+    ├── depends on `Database.hs`
+    ├── depends on `DataLoader.hs`
+    └── depends on `ML.hs`
+- `src/Database.hs`
+    └── depends on `Types.hs`
+- `src/DataLoader.hs`
+    └── depends on `Types.hs`
+- `src/ML.hs`
+    └── depends on `Types.hs`
+- `frontend/app.js`
+    ├── depends on Backend API (`/predict`, `/history`)
+    └── depends on Chart.js (External CDN)
+
+---
+
+## 5. Data Flow
+
+1. **Input**: User inserts inputs (Date, Region, Temp, Humidity) via the HTML form.
+2. **Client Processing**: JS serializes data into JSON and issues a fetch request.
+3. **Server Processing**: backend deserializes JSON into `PredictRequest`.
+4. **Prediction Phase**: Data is appended with a bias (1.0). The resulting vector is dot-product mapped against the pre-trained weights in the machine learning model.
+5. **Storage Phase**: The parameters + resulting prediction are sent to SQLite.
+6. **Output**: System pushes JSON output probabilities back down to JS mapping.
+7. **Rendering**: JS overrides inner text/graphics values based on the data.
+
+---
+
+## 6. API / Interface Explanation
+
+### `/predict`
+- **Method**: `POST`
+- **Handled by**: `Main.hs`
+- **Request Format** (JSON):
+  ```json
+  {
+      "reqMaxTemp": 42.5,
+      "reqMinTemp": 29.1,
+      "reqHumidity": 45.0,
+      "reqDate": "2026-04-15",
+      "reqRegion": "Delhi"
+  }
+  ```
+- **Response Format** (JSON):
+  ```json
+  {
+      "probability": 0.89,
+      "prediction": 1
+  }
+  ```
+
+### `/history`
+- **Method**: `GET`
+- **Handled by**: `Main.hs` via `Database.hs (getHistory)`
+- **Request Format**: None needed.
+- **Response Format** (JSON array of `HistoryRecord`s):
+  ```json
+  [
+      {
+          "hDate": "2026-04-15",
+          "hId": 12,
+          "hMinTemp": 29.1,
+          "hMaxTemp": 42.5,
+          "hRegion": "Delhi",
+          "hPrediction": 1,
+          "hProbability": 0.89,
+          "hHumidity": 45.0
+      }
+  ]
+  ```
+
+### `/health`
+- **Method**: `GET`
+- **Response**: `"OK"` string JSON. Use for ping checks.
+
+---
+
+## 7. Machine Learning Integration
+
+- **Which file trains the model?**: `app/Main.hs` calls the trainer on server load.
+- **Which file loads training data?**: `src/DataLoader.hs` reads `data.csv`.
+- **Which file performs prediction?**: `src/ML.hs` houses the math logic. `Main.hs` executes it upon API hit.
+- **How it works alongside ML**: It is a Logistic Regression model trained from scratch using gradient descent algorithm inside Haskell. Real pattern matching is effectively just matrix multiplication combined with a threshold (sigmoid), converting environmental readings mathematically into a binary logic of "Heatwave (1)" or "Normal (0)".
+
+---
+
+## 8. Frontend Interaction
+
+- **Which file serves the frontend?**: Currently, the frontend consists of static files (`index.html`). There is no dedicated file serving the frontend; it is simply opened directly in the browser or served by a basic HTTP static server (like livereload or python http.server).
+- **Communication with Backend**: AJAX Fetch requests made from `app.js` point to `http://localhost:3000`.
+- **Displaying Predictions**: JS interpolates the probability output and uses DOM manipulation to swap colors (Red for heatwave, Green for normal) and updates circular gradients.
+
+---
+
+## 9. Deployment Considerations
+
+To deploy this project:
+- **Backend**: Can be containerized via Docker or deployed to platforms like Render/Fly.io since it compiles to a standalone Linux binary. The `data.csv` and `heatwave.db` need to be logically mapped as they require persistent storage.
+- **Frontend**: Can be trivially uploaded to Vercel, Netlify, or GitHub pages as it relies strictly on static assets. 
+- You will need to change the `API_BASE` hardcoded url in `app.js` from `localhost:3000` to the actual hosted URL of the backend. Furthermore, CORS settings in `Main.hs` may need to be strictly locked behind the frontend domain instead of `const True`.
+
+---
+
+## 10. Summary
+
+In plain terms, the project is a "Weather Analytics and Prediction Dashboard". It acts like a digital thermometer application with a brain. The brain (the Haskell Backend) learns what a "heatwave" looks like by reading historical CSV data when it starts up. 
+
+When a user opens the dashboard (the Frontend HTML/JS block) and inputs today's temperature and humidity, the dashboard phones the backend. The backend's brain crunches those numbers against what it learned, formulates a percentage of how likely a heatwave is, remembers that prediction in a notebook (SQLite Database), and sends the answer back to the screen so the user can easily see if they need to stay indoors.

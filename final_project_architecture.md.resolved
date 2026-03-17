@@ -1,0 +1,198 @@
+# Heatwave Prediction System - Complete Architectural Breakdown
+
+This document provides a complete, developer-level overview of the Heatwave Prediction project. It is structured to help new developers quickly understand the folder hierarchy, internal file mechanics, data pipelines, integrations, and deployment strategies without having to read every single line of code.
+
+---
+
+## 1. Project Folder Structure
+
+The project is divided into two cleanly separated environments: the **Frontend** (User Interface) and the **Backend** (Server, Machine Learning, and Database).
+
+```
+project_root/
+├── frontend/                     # Client-side web interface
+│   ├── index.html                # Main application layout and tabs
+│   ├── styles.css                # Visual styling and responsive design
+│   └── app.js                    # Core logic, API communication, and dynamic rendering (Charts & Maps)
+│
+└── backend/heatwave-backend/     # Haskell server and ML engine
+    ├── heatwave-backend.cabal    # Haskell package configuration & dependencies
+    ├── data.csv                  # Historical training dataset
+    ├── heatwave.db               # SQLite persistent database (created at runtime)
+    ├── model_weights.json        # Serialized ML model weights (cached training)
+    ├── app/
+    │   └── Main.hs               # Application entry point & Scotty REST API server
+    └── src/
+        ├── Types.hs              # Core data structures and JSON/SQL instance bindings
+        ├── DataLoader.hs         # Parses data.csv into Haskell records
+        ├── Database.hs           # SQLite interaction (storing predictions, fetching history)
+        ├── ML.hs                 # Logistic Regression algorithms, gradients, and normalization
+        └── WeatherAPI.hs         # External API communication with OpenWeatherMap
+```
+
+**Interaction Flow**: 
+The `frontend` sends HTTP parameters via `fetch()` to [backend/app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs). [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs) orchestrates the logic: it pings [WeatherAPI.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/WeatherAPI.hs) for live weather, pushes the weather into [ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs) for regression prediction, saves the result into [Database.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/Database.hs), and returns a single JSON payload back to the [frontend/app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js) renderer.
+
+---
+
+## 2. File-by-File Explanation
+
+### **Frontend**
+- **[index.html](file:///e:/antigravity%20haskell%20-%20Copy/frontend/index.html)**
+  - *Purpose*: The main UI shell.
+  - *Functions*: Contains the Sidebar tabs (Home, Prediction, Results, History, Heatwave Map), input forms, result summary cards, and placeholders for charts/maps.
+  - *Depends on*: [styles.css](file:///e:/antigravity%20haskell%20-%20Copy/frontend/styles.css) (styling), [app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js) (logic), Chart.js (graphs), Leaflet.js (maps).
+  
+- **[styles.css](file:///e:/antigravity%20haskell%20-%20Copy/frontend/styles.css)**
+  - *Purpose*: Defines visual aesthetics.
+  - *Functions*: Manages layout spacing, modern color schemes, typography constraints, animation transitions, and heatmap coloring scales.
+
+- **[app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js)**
+  - *Purpose*: Controls UI behavior and external API requests.
+  - *Functions*: 
+    - [switchTab()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-17): Handles UI navigation.
+    - `submit event listener`: Captures input (City/Date), triggers POST `/predict`.
+    - [showResults()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#45-70): Dynamically updates the "Results" tab with raw backend predictions.
+    - [loadHistory()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#73-84), [renderTable()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#85-110), [renderChart()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#114-166): Fetches GET `/history`, builds tables, and renders interactive Chart.js graphs.
+    - [loadMapView()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#172-245): Pulls India state boundaries using GeoJSON and dynamically shades the Leaflet map based on regional Heatwave probabilities.
+
+### **Backend (Haskell)**
+- **[app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs)**
+  - *Purpose*: Application controller and routing module.
+  - *Functions*:
+    - `main`: Initializes database, loads [data.csv](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/data.csv), calculates Min/Max normalizations, trains ML weights (or loads [model_weights.json](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/model_weights.json)), and boots the Scotty HTTP server.
+    - `GET /health`: Basic health ping.
+    - `POST /predict`: Orchestrates the machine learning sequence natively over API lookups.
+    - `GET /history`: Returns SQL history logs.
+  - *Inputs/Outputs*: Takes raw HTTP requests, outputs structured JSON.
+  - *Depends on*: `Types`, `Database`, `DataLoader`, `ML`, `WeatherAPI`.
+
+- **[src/Types.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/Types.hs)**
+  - *Purpose*: Defines standard data models passed across files.
+  - *Classes/Data*: `HeatwaveData`, `PredictRequest`, `WeatherData`, `PredictResponse`, `HistoryRecord`.
+  - *Functions*: Implements FromJSON/ToJSON templates via Generics to map structures natively between frontend Javascript objects and backend SQL rows.
+
+- **[src/WeatherAPI.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/WeatherAPI.hs)**
+  - *Purpose*: Third-Party Weather Service interface.
+  - *Functions*: `fetchWeather`
+  - *Inputs*: Expects a city region string.
+  - *Outputs*: Makes an outbound HTTP request to OpenWeatherMap, parses their JSON, handles `401 Unauthorized` API errors transparently, and outputs the `WeatherData` record natively.
+  
+- **[src/ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs)**
+  - *Purpose*: Custom-built Binary Logistic Regression Engine.
+  - *Functions*:
+    - `predictProb`, `predictClass`: Computes the sigmoid output of the current weight matrices.
+    - `updateWeights`, `train`: Performs gradient descent iterating over Epochs to build standard weightings.
+    - `scaleFeatures`, `computeMinMax`, `scaleSingleFeature`: Vital Min-Max normalization pipelines mapping widely contrasting values (like Pressure=1010, Temp=30) firmly down to decimal boundaries tracking between 0.0 and 1.0 to guarantee regression matrices do NOT throw false positives.
+  
+- **[src/Database.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/Database.hs)**
+  - *Purpose*: SQLite engine loop.
+  - *Functions*: 
+    - `initDB`: Creates the `history_v2` table seamlessly at runtime.
+    - `savePrediction`: Inserts new tracked sessions efficiently. 
+    - `getHistory`: Fetches and bounds the array of past metrics specifically for charting visuals.
+
+- **[src/DataLoader.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/DataLoader.hs)**
+  - *Purpose*: Parses the initial [data.csv](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/data.csv) historical CSV block.
+  - *Functions*: `loadData` and `extractFeatures`. Coerces raw statistical CSV metrics into floating-point vectors perfectly formatted for initial [ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs) weightings.
+
+---
+
+## 3. System Flow (Step-by-Step)
+
+**Setup & Training (Program Start)**:
+1. [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs) boots and calls `Database.initDB` to ensure `heatwave.db` exists.
+2. [DataLoader.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/DataLoader.hs) reads [data.csv](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/data.csv) parsing past weather conditions natively.
+3. [ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs) derives mathematical `Min/Max` ranges from the dataset arrays to normalize features (e.g., compressing pressure numbers to a uniform zero-to-one scale).
+4. [ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs) executes Logistic Regression training over 5000 epochs, finalizing standard error bounds and weights, which are then cached into [model_weights.json](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/model_weights.json) to prevent slow reboots later.
+5. The Scotty Web Server boots seamlessly over port `3000`.
+
+**Handling a Prediction Sequence**:
+1. The user visits [index.html](file:///e:/antigravity%20haskell%20-%20Copy/frontend/index.html), inputs a city (e.g. "Delhi"), and clicks "Predict".
+2. [app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js) wraps "Delhi" into JSON, sending an HTTP POST command sequentially.
+3. [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs) receives the POST at `/predict`.
+4. The server natively asks [WeatherAPI.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/WeatherAPI.hs) to perform a lookup cleanly passing the "Delhi" string out towards **OpenWeatherMap**. 
+5. The OpenWeatherMap API sends back `[Temp, Humidity, WindSpeed, Pressure]`, which [WeatherAPI.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/WeatherAPI.hs) packages neatly directly into a Haskell `WeatherData` type format.
+6. [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs) uses the mathematical bounds saved at boot, passes the new `WeatherData` natively to `ML.scaleSingleFeature`, and outputs a perfectly compressed testing array.
+7. This array is fed to `ML.predictProb`, dynamically applying pattern matching via `sigmoid (dotProduct weights features)` to generate an absolute float metric (e.g. `0.85`).
+8. `Database.savePrediction` executes a fast SQLite `INSERT` committing exactly what happened into `heatwave.db`.
+9. [app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js) catches the response and automatically flips the visual interface displaying "85% Likelihood - Heatwave Expected 🔥" dynamically.
+
+---
+
+## 4. Dependency Map
+
+The application resolves imports cleanly from the bottom level upwards:
+
+- `Types` (Base Layer) → Used by *EVERYONE*.
+- `DataLoader` → Depends on `Types`.
+- `ML` → Depends on `Types`.
+- `WeatherAPI` → Depends on `Types`.
+- `Database` → Depends on `Types`.
+- `Main` (Top Layer) → Depends on `Types`, `DataLoader`, `ML`, `WeatherAPI`, and `Database`.
+
+---
+
+## 5. Data Flow (Input → Output)
+
+1. **User Input Phase**: `"Delhi"` → User types into HTML form `<input>` → JS bundles it into JSON.
+2. **API Fetching Phase**: `{"reqCity": "Delhi"}` gets caught by the Haskell Server. Server calls `http://api.openweathermap.org...Delhi`. Data comes back mathematically pure (`{"temp_max": 35.0}`).
+3. **Machine Learning Pipeline**: Data `[35.0, ...]` → `scaleSingleFeature` compresses to `[0.72, ...]` to match dataset magnitudes.
+4. **Prediction Phase**: Normalized Data `[0.72, ...]` is passed to ML model. Sigmoid output returns `0.85`.
+5. **Output Processing Phase**: Prediction `0.85` combined securely with real-weather API response into a `PredictResponse` block → Rendered to JSON → Sent via HTTP to the user screen → Logged silently mapping against SQLite.
+
+---
+
+## 6. API / Interface Explanation
+
+1. **`POST /predict`**
+   - *Format IN*: `{"reqCity": "Chennai", "reqDate": "2026-03-15"}`
+   - *Format OUT*: `{"prediction":1, "probability":0.85, "responseCity":"Chennai", "usedWeather":{"wTempMax":42.0, ...}}`
+   - *Handler*: [app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs)
+
+2. **`GET /history`**
+   - *Format IN*: None (Standard GET Parameter).
+   - *Format OUT*: A JSON Array array mapping all tracked predictions containing exactly probabilities, regions, dates, and recorded metrics `[{ "hRegion": "Delhi", "hProbability": 0.85 ...}]`.
+   - *Handler*: [app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs)
+
+---
+
+## 7. Machine Learning Integration
+
+- **Training**: Executed uniquely inside [app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs) via `ML.train` automatically at boot mapping against [data.csv](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/data.csv).
+- **Loading Model**: Main.hs natively verifies whether [model_weights.json](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/model_weights.json) physically exists on disk. If so, it reads the weights natively over ByteStrings skipping re-training.
+- **Pattern Matching & Prediction**: Feature arrays and coefficients run continuously across continuous dot products inside [ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs) (`predictProb`). High values represent strong gradient matching signifying severe Heatwave characteristics triggering true bounds natively mapping outputs cleanly above the `0.5` threshold line.
+
+---
+
+## 8. Frontend Interaction
+
+- **Server**: Typically handled explicitly via separate Web Servers (like `Nginx` or `VSCode Live Server`). The [index.html](file:///e:/antigravity%20haskell%20-%20Copy/frontend/index.html) file runs statically directly inside browsers.
+- **Communication**: Executed asynchronously using standard HTML `fetch` promises pinging natively against `http://localhost:3000`.
+- **Display**: Results manipulate the standard DOM explicitly. Prediction cards inject percentages into `prob-circle` divs using custom CSS sweeps (`conic-gradients`), while the History tabs use `Chart.js` to draw canvas lines over probability datasets. The Mapping interface pulls raw `historyData` mapping probabilties to GeoJSON state layouts utilizing pure `Leaflet.js`.
+
+---
+
+## 9. Deployment Considerations
+
+To securely deploy this framework into Production (e.g. AWS, Render, Heroku):
+
+1. **Backend Server (`Haskell`)**: 
+   - Deploy as a Docker process orchestrating `cabal build` natively over Linux base-images.
+   - You need the `heatwave-backend/` folder entirely, specifically [app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs), the `src/` modules, [heatwave-backend.cabal](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/heatwave-backend.cabal), and [data.csv](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/data.csv) (for dynamic retraining logic).
+   - **Environment Variables**: OpenWeatherMap API keys should NOT be written locally on deployment layers (`apiKey = sys.getEnv "OWM_KEY"`).
+
+2. **Frontend Intersect (Vercel/Netlify)**:
+   - Contains just the static `/frontend` folder (`index.html`, `app.js`, `styles.css`). 
+   - Simply configure Vercel root directly targeting the frontend array. 
+   - *Crucial Check*: Change `const API_BASE = 'http://localhost:3000'` in `app.js` to point explicitly toward your newly hosted Haskell Backend URL (e.g., `https://api.myheatwaveapp.com`).
+
+3. **Persistent Databases**: Storage (`heatwave.db`) needs explicit read/write file mounting mappings (Volumes) safely outside standard isolated computing containers so history persists across server restarts correctly.
+
+---
+
+## 10. Summary (Plain Terms)
+
+This project is a powerful web application that predicts if a specific city will suffer a Heatwave! 
+
+Instead of forcing users to guess complicated weather statistics efficiently, the Backend does all the heavy lifting. The frontend is a pretty website showing cool charts and an interactive map. When the user types any city globally, the Haskell backend talks back and forth tightly with live global weather satellites (via OpenWeatherMap API). Once it gets the exact metrics natively, it mathematically shrinks those numbers using "Min-Max Features" so that our Machine Learning logic natively understands exactly the characteristics happening. It calculates the Heatwave probability, logs what essentially happened permanently into an SQLite database for history charting, and updates the user's interface smoothly with the exact forecast visually!

@@ -1,0 +1,65 @@
+cabal-version:      3.12
+
+name:               heatwave-backend
+version:            0.1.0.0
+license:            NONE
+author:             Chetan-Kumar-G
+maintainer:         chetangr210307@gmail.com
+build-type:         Simple
+
+extra-doc-files:    CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+
+    exposed-modules:
+        Types
+        Database
+        DataLoader
+        ML
+        WeatherAPI
+        WeatherHistoryAPI
+
+    build-depends:
+        base ^>=4.18.3.0,
+        scotty,
+        aeson,
+        sqlite-simple,
+        cassava,
+        bytestring,
+        text,
+        vector,
+        http-types,
+        wai-cors,
+        http-conduit,
+        lens,
+        lens-aeson,
+        random,
+        time
+
+    hs-source-dirs:   src
+    default-language: Haskell2010
+
+
+executable heatwave-backend
+    import:           warnings
+
+    main-is:          Main.hs
+
+    build-depends:
+        base ^>=4.18.3.0,
+        heatwave-backend,
+        scotty,
+        aeson,
+        wai-cors,
+        bytestring,
+        directory,
+        http-conduit,
+        http-types,
+        text
+
+    hs-source-dirs:   app
+    default-language: Haskell2010

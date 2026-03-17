@@ -1,0 +1,280 @@
+# Developer Architectural Analysis: Heatwave Prediction System
+
+This document provides a deep, code-level structural breakdown of the Heatwave Prediction project. It is intended for software engineers and data scientists looking to understand, maintain, or extend the existing Haskell + Vanilla JS stack.
+
+---
+
+## 1. Project Structure
+
+The project strictly divides raw UI static files and a Haskell backend serving cross-origin APIs.
+
+```
+heatwave-project/
+├── backend/
+│   ├── heatwave-backend/
+│   │   ├── app/
+│   │   │   └── Main.hs         # Core server instance, routing, startup routines
+│   │   ├── src/
+│   │   │   ├── Types.hs        # Data Models and JSON encoding/decoding instances
+│   │   │   ├── Database.hs     # SQLite persistence layer and schema definitions
+│   │   │   ├── DataLoader.hs   # CSV parsing and feature vector extraction map
+│   │   │   └── ML.hs           # Pure functional Logistic Regression implementation
+│   │   ├── data.csv            # Static ML training dataset
+│   │   └── heatwave-backend.cabal # Cabal package spec
+└── frontend/
+    ├── index.html              # Main application markup layout
+    ├── styles.css              # Custom layout, styling, animations (CSS)
+    └── app.js                  # DOM Manipulation, Fetch logic, and Chart.js integration
+```
+
+---
+
+## 2. File-by-File Analysis
+
+### Backend
+
+#### [app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs)
+- **Purpose**: The entry point for the REST API. Handles HTTP logic, manages state (ML model weights), and trains the initial model.
+- **Functions**:
+  - `main :: IO ()` - App bootstrapper. Initializes SQLite DB, extracts data from [data.csv](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/data.csv), trains the Logistic Regression model, saves weights in an `IORef`, and bootstraps the Scotty server with CORS enabled. Outlines GET `/health`, POST `/predict`, GET `/history`.
+- **Inputs/Outputs**: No formal params. Returns `IO ()`.
+- **Variables**: `initialWeights`, `learningRate = 0.001`, `epochs = 5000`, `weightsRef`.
+- **Imports**: `Web.Scotty`, `Network.Wai.Middleware.Cors`, `Data.Aeson`, `Control.Monad.IO.Class`, `Types`, `Database`, `DataLoader`, `ML`, `Data.IORef`.
+- **Dependents**: Serves the frontend directly. Relies on all other [.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs) modules.
+
+#### [src/Types.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/Types.hs)
+- **Purpose**: The domain model. Connects JSON and SQLite payloads into typed Haskell records.
+- **Classes/Types**:
+  - `HeatwaveData` - Training struct. `date, region, maxTemp, minTemp, humidity, heatwave`.
+  - `PredictRequest` - Input struct. `reqMaxTemp, reqMinTemp, reqHumidity, reqDate, reqRegion`.
+  - `PredictResponse` - Output struct. `probability, prediction`.
+  - `HistoryRecord` - Database struct. `hId, hDate...`
+- **Instances**: Derived `FromJSON/ToJSON` via `Generic`. Custom `FromRow/ToRow` for SQLite row bindings.
+- **Imports**: `Data.Aeson`, `GHC.Generics`, `Database.SQLite.Simple`, `Data.Text`.
+- **Dependents**: Imported by EVERY module in the backend.
+
+#### [src/ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs)
+- **Purpose**: A pure, dependency-free mathematical module running Binary Logistic Regression.
+- **Functions**:
+  - `sigmoid :: Double -> Double` - Squeezes numbers between 0 and 1.
+  - `dotProduct :: [Double] -> [Double] -> Double` - Computes the vector dot product $\sum (w_i * x_i)$.
+  - `predictProb :: [Double] -> [Double] -> Double` - Maps weights * features through `sigmoid`.
+  - `predictClass :: [Double] -> [Double] -> Double -> Int` - Casts probability logic strictly > than threshold (`0.5`).
+  - `updateWeights :: [Double] -> Double -> [([Double], Double)] -> [Double]` - Runs one full pass (epoch) of gradient descent computing gradient [(actual - prediction) * x](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-14). 
+  - `train :: Int -> Double -> [([Double], Double)] -> [Double] -> [Double]` - Recursively calls `updateWeights` for $N$ epochs.
+- **Imports**: [Types.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/Types.hs)
+- **Dependents**: [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs)
+
+#### [src/DataLoader.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/DataLoader.hs)
+- **Purpose**: Responsible for consuming raw data streams and structuring feature matrices for the AI.
+- **Functions**:
+  - `parseNamedRecord` instance - Cassava's hook for mapping CSV columns to `HeatwaveData`.
+  - `loadData :: FilePath -> IO [HeatwaveData]` - Performs Lazy IO read on CSV and runs structural decoding.
+  - `extractFeatures :: [HeatwaveData] -> [([Double], Double)]` - Converts records to structured vectors: [([Bias (1.0), MaxTemp, MinTemp, Humidity], TargetLabel)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-14).
+- **Imports**: `Data.ByteString.Lazy`, `Data.Csv`, `Data.Vector`, `Types`.
+- **Dependents**: [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs)
+
+#### [src/Database.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/Database.hs)
+- **Purpose**: Wraps SQLite bindings into neat side-effect IO calls.
+- **Functions**:
+  - `dbName :: String` - Static variable `"heatwave.db"`.
+  - `initDB :: IO ()` - Ensures the table `history` is mapped correctly using raw SQL `CREATE TABLE IF NOT EXISTS`.
+  - `savePrediction :: PredictRequest -> PredictResponse -> IO ()` - Appends `INSERT` statements using parameterized queries [(?, ?, ?, ...)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-14).
+  - `getHistory :: IO [HistoryRecord]` - Queries the table with a strict bounds check (`LIMIT 50`) ordered by desc.
+- **Imports**: `Database.SQLite.Simple`, `Types`, `Data.Text`
+- **Dependents**: [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs)
+
+### Frontend
+
+#### [app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js)
+- **Purpose**: Controls interaction, manages state view overlays, and pushes requests entirely client-side.
+- **Functions**:
+  - [switchTab(tabId, element)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-14) - Toggles CSS `active` classes for SPA emulation dynamically.
+  - Event Listener (`submit`) - Prevents page reload, parses HTML inputs (`reqDate`, `reqMaxTemp`, etc.), formats JSON string, and calls `fetch()`. Wait state is shown until JSON received, then pushes into [showResults()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#45-63).
+  - [showResults(data)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#45-63) - Mutates the UI elements (circular `.style.background` property based on probability array) for aesthetic outcome.
+  - [loadHistory()](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#66-77) - Fires asynchronous `fetch()` to `/history`, piping data arrays into table render and graph render.
+  - [renderTable(data)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#78-99) - Procedurally generates DOM nodes `<tr><td>...</td></tr>` for table logic logic.
+  - [renderChart(data)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#100-148) - Destroys the pre-existing `historyChart` cache on `Canvas`, mutates payloads into arrays (Reverse map to fix ordering), and bootstraps a multi-axis `Chart.js` graph.
+
+---
+
+## 3. Code Flow Execution Trace
+
+1. **System Boot (`$ cabal run`)**:
+   - Program hits `main` block inside [app/Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs).
+   - `initDB` is fired connecting/creating `heatwave.db`.
+   - `loadData ("data.csv")` consumes rows into standard memory.
+   - `extractFeatures` reshapes the data explicitly injecting a `bias` attribute value format `[1.0, maxTemp, minTemp, humidity]`.
+   - `train` kicks off the `updateWeights` iteration. It recurses exactly `5000` times taking strict matrix logic to compute weight parameters locally.
+   - `trainedWeights` list `[biasWeight, tempWeight, etc]` is stored inside a transactional `IORef` (`weightsRef`) meaning threaded web requests can read it concurrently.
+   - The blocking Scotty Web Server starts listening implicitly on standard IO port `3000`.
+
+2. **Incoming User Request (`POST /predict`)**:
+   - [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs) picks up routing. `req <- jsonData` decodes incoming bytestream strictly into `PredictRequest` types safely.
+
+3. **Processing Phase**:
+   - The thread reads the model synchronously: `weights <- liftIO $ readIORef weightsRef`.
+   - Local properties wrap the model signature: `let reqFeatures = [1.0, reqMaxTemp req, reqMinTemp req, reqHumidity req]`.
+   - Feature mapped inside `predictProb` and `predictClass`.
+
+4. **Result Generation**:
+   - Creates the outgoing struct: `let resp = PredictResponse prob pClass`.
+
+5. **Data Persistence**:
+   - Thread jumps into SQLite logic asynchronously: `liftIO $ savePrediction req resp`.
+
+6. **Network Transmission**:
+   - The JSON encoded memory (`json resp`) passes headers down socket returning `200 OK`.
+
+---
+
+## 4. Backend API Flow: `POST /predict`
+
+```haskell
+post "/predict" $ do
+    -- 1. Request Parsing: Cassava + Aeson converts JSON to PredictRequest record implicitly.
+    req <- jsonData :: ActionM PredictRequest
+    
+    -- 2. Retrieve State: IO thread yields the pre-computed Logistic Regression weights.
+    weights <- liftIO $ readIORef weightsRef
+    
+    -- 3. Feature Preparation: Extracts exact properties from input, adding constant `1.0` intercept term.
+    let reqFeatures = [1.0, reqMaxTemp req, reqMinTemp req, reqHumidity req]
+    
+    -- 4. ML Prediction Logic:
+    -- Runs `sigmoid( Σ(weights * reqFeatures) )`
+    let prob = predictProb weights reqFeatures
+    -- Evaluates against a 0.5 logical threshold
+    let pClass = predictClass weights reqFeatures 0.5
+    
+    -- 5. Response Assembly: Wraps types into the final standard schema output.
+    let resp = PredictResponse prob pClass
+    
+    -- 6. Database Interaction: Appends query result to SQLite instance safely across bounds.
+    liftIO $ savePrediction req resp
+    
+    -- 7. Returns serialized JSON.
+    json resp
+```
+
+---
+
+## 5. Machine Learning Implementation Details
+
+- **Model Type**: Binary Logistic Regression (Supervised Classification).
+- **Feature Vector**: Size 4. `[Bias (1.0), Max Temperature, Min Temperature, Humidity]`.
+- **Mathematical Logic (Hypothesis)**: Extends standard linear boundaries utilizing the sigmoid link function:  
+  $h_\theta(x) = \sigma(\theta^T x) = \frac{1}{1 + e^{-\sum (\text{weights} \cdot \text{features})}}$
+- **Training Algorithm**: Full-Batch Gradient descent (Strict loop recursion without libraries).
+- **Gradient Update Rule**:  
+  $\theta_j := \theta_j - \alpha \frac{1}{m} \sum_{i=1}^m (h_\theta(x^{(i)}) - y^{(i)}) x_j^{(i)}$
+- **Time Complexity**:  $O(E \cdot m \cdot n)$ where $E$ = Epochs (5000), $m$ = Data rows (number of items in CSV), $n$ = Features (4). Space complexity is effectively $O(1)$ mutation holding parameters locally.
+
+```haskell
+-- Gradient implementation snippet from ML.hs
+let gradients = foldl (\acc (x, y) -> 
+        let h = predictProb weights x
+            error_val = h - y             -- Difference from actual
+            grad = map (* error_val) x    -- Compute vector gradient
+        in zipWith (+) acc grad           -- Accumulate total gradients
+    ) (replicate (length weights) 0.0) dataset
+```
+
+---
+
+## 6. Dependency Graph
+
+```text
+               [Scotty Web Framework]  [Cassava / Aeson CSV & JSON]
+                      │                           │
+                      ▼                           ▼
+                ┌────────────┐               ┌──────────────┐
+                │ Main.hs    │◄──────────────┤ DataLoader.hs│
+                └──────┬─────┘               └──────┬───────┘
+                       │                            │
+      ┌────────────────┼────────────────┐           │
+      ▼                ▼                ▼           │
+┌──────────┐     ┌───────────┐     ┌──────────┐     │
+│ Database │     │    ML.hs  │     │ Types.hs │◄────┘
+└────┬─────┘     └─────┬─────┘     └──────────┘
+     │                 │                ▲
+     └─────────────────┴────────────────┘
+     (Every module directly maps domain models to Types)
+```
+
+---
+
+## 7. Data Flow Map
+
+1. **Frontend (Browser UI)**: Client types payload inside HTML form → `JSON.stringify(reqData)`.
+2. **Transfer**: JSON payload transmitted strictly over `fetch` on port 3000 to Scotty API Server.
+3. **Backend Parsing**: Scotty receives byte stream, applies `Aeson` decode mapping struct onto `PredictRequest`.
+4. **Machine Learning Model Engine**: Request vector pushed strictly into functionally pure module [ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs). Variables multiplied by in-memory `IORef` variable array.
+5. **Persistence Engine**: Outcome pushed into disk drive stream `SQLite (heatwave.db)` appending log records safely.
+6. **Return Route**: JSON mapped payload output via `PredictResponse` sent via Scotty.
+7. **Frontend (Browser Client View)**: `.json()` parses logic, pushing numeric values to DOM element mapping functions.
+
+---
+
+## 8. Critical Code Snippets Explained
+
+### ML Prediction Engine (Pure math logic inside Haskell)
+```haskell
+-- Maps values to Sigmoid Probability mathematically
+predictProb :: [Double] -> [Double] -> Double
+predictProb weights features = 1.0 / (1.0 + exp (-(sum $ zipWith (*) weights features)))
+```
+
+### Database Persistence Engine
+```haskell
+savePrediction :: PredictRequest -> PredictResponse -> IO ()
+savePrediction req res = do
+    conn <- open dbName
+    -- Pure parameterization blocks malicious SQL Injections inherently
+    execute conn "INSERT INTO history (date, region, max_temp, min_temp, humidity, probability, prediction) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        (reqDate req, reqRegion req, reqMaxTemp req, reqMinTemp req, reqHumidity req, probability res, prediction res)
+    close conn
+```
+
+### Frontend State Controller
+```javascript
+// Destructures JSON prediction mapping styles logically onto the View Canvas
+function showResults(data) {
+    const isHeatwave = data.prediction === 1;
+    const probPct = (data.probability * 100).toFixed(1);
+    
+    // Updates UI string state based on ML output
+    document.getElementById('res-status').innerText = isHeatwave ? "Heatwave Expected 🔥" : "No Heatwave 🌤️";
+    
+    // Updates UI logic gradient circle map for data visibility
+    const color = isHeatwave ? "#e84118" : "#44bd32";
+    document.getElementById('prob-circle').style.background = `conic-gradient(${color} ${probPct}%, #eee 0%)`;
+}
+```
+
+---
+
+## 9. Potential Improvements
+
+### Architecture Weaknesses
+- **State Management**: The API relies on `IORef` memory state (`weightsRef`) mapping. It is memory volatile, meaning every restart causes it to retrain. The model state should ideally be serialized to disk for immediate application mapping.
+- **Error Handling**: [app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js) catches API network errors effectively, but [Main.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/app/Main.hs) could map deeper HTTP standard behaviors (ex: Mapping HTTP `400 Bad Request` explicitly if JSON structural parameters missing).
+
+### Machine Learning
+- **Dataset Scaling**: Uses naive Full-Batch memory Gradient Descent mapping via standard lists. Changing it to Stochastic Gradient Descent (SGD) or Mini-Batch logic would prevent scaling bottlenecks if [data.csv](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/data.csv) becomes exponentially larger.
+- **Normalization**: Features like temperature vs humidity run inherently differently mathematically. The codebase is missing an explicit Z-Score Standardization map inside [ML.hs](file:///e:/antigravity%20haskell%20-%20Copy/backend/heatwave-backend/src/ML.hs) avoiding gradient convergence lag.
+
+### Scalability and Deployment
+- The system uses SQLite locally. Shifting application state mappings off SQLite memory maps into formal Postgres pools increases write locks functionality across scaled pods.
+
+---
+
+## 10. Developer Summary
+
+The application operates as a standalone predictive modeling Full-Stack Web App. 
+
+As a **frontend developer**, your logic loops through [app.js](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js) focusing on updating DOM representations through `Fetch` payloads connecting JSON payloads locally inside the memory states of the component boundaries.
+
+As a **backend / data developer**, your application relies on Haskell's type-safety mechanics. If you want to modify a database route, mutate the schema inside `initDB (Database.hs)`, update JSON structural models [(Types.hs)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-14), and parse it strictly using HTTP middleware mapping [(Main.hs)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-14). Modifying the actual intelligence occurs completely decoupled securely within pure functional boundaries [(ML.hs)](file:///e:/antigravity%20haskell%20-%20Copy/frontend/app.js#3-14).
+
+It is clean, robust, structurally separated, perfectly type-checked, and relies on 0 machine learning abstraction libraries.
