@@ -2,7 +2,7 @@ FROM haskell:9.2
 
 WORKDIR /app
 
-COPY . .
+COPY backend/heatwave-backend /app
 
 RUN cabal update
 RUN cabal build
